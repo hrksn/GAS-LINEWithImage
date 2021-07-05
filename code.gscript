@@ -1,0 +1,133 @@
+let SEARCH_WORD = '障害'; // GMAILの検索ワード
+
+let MAIL_FROM = 'server-down@example.com'; // 送り元の名前も含む (XXX <test@example.com>)
+let MAIL_FROM_MATCH = 1; // FROMのアドレスが一致しているか検証するか 0:検証しない 1:検証する
+
+let MAIL_TITLE = 'LINE画像添付テスト'; // タイトルチェックのモードに合わせて変更
+let TITLE_EXACT_MATCH = 1; // 0: チェックしない 1: タイトルに含まれていればOK 2: 完全一致
+
+let LINE_TOKEN = 'AAAAAAAAAAAAAAAABBBBBBBBBBBBBBXXXXXXXXXXXXXXXXX';
+
+// フォルダー名ではない
+let FOLDER_ID = 'hogehoge';
+let GOOGLE_DRIVE_SAVE = 1; // 0: 保存しない 1:保存する
+
+// 画像ファイルのContentType
+let IMAGE_CONTENT_TYPE = 'image/jpeg'
+let IMAGE_CONTENT_TYPE_MATCH = 1; // 0: チェックしない 1:チェックする
+
+function searchAndSend(){
+
+  if(GOOGLE_DRIVE_SAVE == 1){
+    var folder = DriveApp.getFolderById(FOLDER_ID);
+    if (!folder) {
+      Logger.log('Google Driveにフォルダーを作成してください');
+      return;
+    }
+  }
+
+  // 指定した件名のスレッドを検索して取得 
+  // 実行間隔の間に複数のメールが届く可能性がある場合は、合わせて件数を変更する
+  let threads = GmailApp.search(SEARCH_WORD, 0, 1); 
+  //スレッドからメールを取得し二次元配列に格納
+  let messages = GmailApp.getMessagesForThreads(threads);
+  for(let i in messages){
+    // 届いたメールはスレッドの0番目
+    let message = messages[i][0];
+
+    // 必ずタイトルが一致したものだけを取得してくれるわけではないので
+    // チェックが必要
+    if(!checkTarget(message)){
+      continue;
+    }
+
+    console.log(message.getSubject())
+
+    // スター有無によって実行済みを判定
+    // スターが増えていくのがイヤならゴミ箱に入れる
+    if(!message.isStarred()){
+      // 添付画像を送る
+      if(message.getAttachments().length > 0){
+        message.getAttachments().forEach(function (attachment) {
+
+            // 添付ファイルをGoogleDriveに保存
+            if(GOOGLE_DRIVE_SAVE == 1){
+              folder.createFile(attachment);
+            }
+
+            let send_image = null
+            // ContentTypeチェック
+            if(IMAGE_CONTENT_TYPE_MATCH == 1){
+              if(attachment.getContentType() == IMAGE_CONTENT_TYPE){
+                send_image = attachment
+              }
+            }else{
+              send_image = attachment
+            }
+
+            sendMessage = createMessage(message);
+            sendLine(sendMessage, send_image);
+        });
+      }else{
+        sendMessage = createMessage(message);
+        sendLine(sendMessage, null);
+      }
+
+      //message.moveToTrash();
+      message.star()
+    }
+  }
+}
+
+/**
+ * ターゲットとして正しいか確認
+ */
+function checkTarget(message){
+  // メールアドレスの一致チェック
+  if(MAIL_FROM_MATCH == 1 && message.getFrom() != MAIL_FROM){
+    return false;
+  }
+
+  if(TITLE_EXACT_MATCH > 0){
+    // タイトルの完全一致
+    if(TITLE_EXACT_MATCH == 2 && message.getSubject() != MAIL_TITLE){
+      return false;
+    }
+    // タイトルの部分一致
+    else if(TITLE_EXACT_MATCH == 1 && message.getSubject().indexOf(MAIL_TITLE) < 0){
+      return false;
+    }
+  }
+
+  return true;
+}
+
+/**
+ * 送信メッセージを構築
+ */
+function createMessage(message){
+  return message.getDate() + message.getPlainBody();
+}
+
+/**
+ * LINE notifyで送信
+ */
+function sendLine(message,image){
+
+  let payload = {
+   'message' : message,
+  }
+  if(image != null){
+    payload.imageFile = image
+  }
+
+  //Lineに送信するためのトークン
+  let options =
+  {
+    "method"  : "post",
+    "payload" : payload,
+    "headers" : {"Authorization" : "Bearer "+ LINE_TOKEN},
+  };
+ 
+  UrlFetchApp.fetch("https://notify-api.line.me/api/notify",options);
+}
